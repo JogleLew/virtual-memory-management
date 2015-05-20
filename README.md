@@ -1,7 +1,7 @@
 # Vitrual Memory Manage
 > This is BUAA OS Experiment 3. 
 
-> OS实验2 - 虚存管理
+> OS实验3 - 虚存管理
 
 ## Introduction 介绍
 基本要求：

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <memory.h>
 #include "vmm.h"
 #define DEBUG
 
@@ -15,7 +16,30 @@ BOOL blockStatus[BLOCK_SUM];
 /* 访存请求 */
 Ptr_MemoryAccessRequest ptr_memAccReq;
 
+void JGdo_print_aux_info()
+{
+	int i;
+	BYTE auxMem[512];
+	if (fseek(ptr_auxMem, 504, SEEK_SET) < 0)
+	{
+		do_error(ERROR_FILE_SEEK_FAILED);
+		exit(1);
+	}
+	memset(auxMem, 0, sizeof(auxMem));
+	fread(auxMem, 1, 512, ptr_auxMem);
+	printf("辅存信息：\n");
+	for (i = 0; i < 512; i++)
+		printf("地址%3d : %d\n", i, auxMem[i]);
+	printf("\n");
+}
 
+void JGdo_print_act_info()
+{
+	int i;
+	printf("实存信息：\n");
+	for (i = 0; i < ACTUAL_MEMORY_SIZE; i++)
+		printf("地址%3d : %d\n", i, actMem[i]);
+}
 
 /* 初始化环境 */
 void do_init()
@@ -383,7 +407,7 @@ void do_print_info()
 	printf("页号\t块号\t装入\t修改\t保护\t计数\t辅存\n");
 	for (i = 0; i < PAGE_SUM; i++)
 	{
-		printf("%u\t%u\t%u\t%u\t%s\t%u\t%u\n", i, pageTable[i].blockNum, pageTable[i].filled, 
+		printf("%u\t%u \t%u\t\t%u\t%s\t%u  \t%u\n", i, pageTable[i].blockNum, pageTable[i].filled, 
 			pageTable[i].edited, get_proType_str(str, pageTable[i].proType), 
 			pageTable[i].count, pageTable[i].auxAddr);
 	}
@@ -426,9 +450,12 @@ int main(int argc, char* argv[])
 	{
 		do_request();
 		do_response();
-		printf("按Y打印页表，按其他键不打印...\n");
-		if ((c = getchar()) == 'y' || c == 'Y')
+		printf("按Y打印页表，辅存和实存，按其他键不打印...\n");
+		if ((c = getchar()) == 'y' || c == 'Y'){
 			do_print_info();
+			JGdo_print_aux_info();
+			JGdo_print_act_info();
+		}
 		while (c != '\n')
 			c = getchar();
 		printf("按X退出程序，按其他键继续...\n");
