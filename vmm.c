@@ -366,6 +366,40 @@ void do_error(ERROR_CODE code)
 	}
 }
 
+int JGdo_request()
+{
+	int addr, writeValue;
+	char c;
+	printf("请输入请求地址：");
+	scanf("%d", &addr);
+	if (addr >= VIRTUAL_MEMORY_SIZE){
+		printf("输入错误，请重新输入。\n");
+		return 1;
+	}
+	ptr_memAccReq->virAddr = addr;
+	printf("请输入请求类型(r/w/x)：");
+	scanf(" %c", &c);
+	switch (c){
+		case 'r': case 'R': 
+			ptr_memAccReq->reqType = REQUEST_READ;
+			printf("请求：\n地址：%u\t类型：读取\n", ptr_memAccReq->virAddr);
+		break;
+		case 'w': case 'W': 
+			ptr_memAccReq->reqType = REQUEST_WRITE;
+			printf("请输入写入内容：");
+			scanf("%d", &writeValue);
+			ptr_memAccReq->value = writeValue;
+		break;
+		case 'x': case 'X': 
+			ptr_memAccReq->reqType = REQUEST_EXECUTE;
+			printf("产生请求：\n地址：%u\t类型：执行\n", ptr_memAccReq->virAddr);
+		break;
+		default: 
+			printf("输入错误，请重新输入。\n"); return 1;
+	}
+	return 0;
+}
+
 /* 产生访存请求 */
 void do_request()
 {
@@ -448,7 +482,8 @@ int main(int argc, char* argv[])
 	/* 在循环中模拟访存请求与处理过程 */
 	while (TRUE)
 	{
-		do_request();
+		//do_request();
+		while (JGdo_request()) ;
 		do_response();
 		printf("按Y打印页表，辅存和实存，按其他键不打印...\n");
 		if ((c = getchar()) == 'y' || c == 'Y'){
