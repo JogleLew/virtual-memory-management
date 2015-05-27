@@ -1,8 +1,7 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include "vmm.h"
-#define DEBUG
 
 /* 页表 */
 PageTableItem pageTable[PAGE_SUM];
@@ -24,6 +23,7 @@ void do_init()
 	srandom(time(NULL));
 	for (i = 0; i < PAGE_SUM; i++)
 	{
+		pageTable[i].unusedTime=0;
 		pageTable[i].pageNum = i;
 		pageTable[i].filled = FALSE;
 		pageTable[i].edited = FALSE;
@@ -87,6 +87,14 @@ void do_init()
 	}
 }
 
+//ALogorithm LRU necessary steps on the taken
+void LRU_entail(Ptr_PageTableItem ptr_pageTabIt){
+	int i;
+	ptr_pageTabIt->unusedTime=0;
+	for (i = 0; i < PAGE_SUM; i++)
+		if (i != ptr_pageTabIt->pageNum)
+			pageTable[i].unusedTime++;
+}
 
 /* 响应请求 */
 void do_response()
@@ -124,6 +132,7 @@ void do_response()
 	{
 		case REQUEST_READ: //读请求
 		{
+			LRU_entail(ptr_pageTabIt);
 			ptr_pageTabIt->count++;
 			if (!(ptr_pageTabIt->proType & READABLE)) //页面不可读
 			{
@@ -136,6 +145,7 @@ void do_response()
 		}
 		case REQUEST_WRITE: //写请求
 		{
+			LRU_entail(ptr_pageTabIt);
 			ptr_pageTabIt->count++;
 			if (!(ptr_pageTabIt->proType & WRITABLE)) //页面不可写
 			{
@@ -150,6 +160,7 @@ void do_response()
 		}
 		case REQUEST_EXECUTE: //执行请求
 		{
+			LRU_entail(ptr_pageTabIt);
 			ptr_pageTabIt->count++;
 			if (!(ptr_pageTabIt->proType & EXECUTABLE)) //页面不可执行
 			{
@@ -184,13 +195,15 @@ void do_page_fault(Ptr_PageTableItem ptr_pageTabIt)
 			ptr_pageTabIt->filled = TRUE;
 			ptr_pageTabIt->edited = FALSE;
 			ptr_pageTabIt->count = 0;
+			ptr_pageTabIt->unusedTime=0;
 			
 			blockStatus[i] = TRUE;
 			return;
 		}
 	}
 	/* 没有空闲物理块，进行页面替换 */
-	do_LFU(ptr_pageTabIt);
+        // do_LRU replaced do_LFU type
+	do_LRU(ptr_pageTabIt);
 }
 
 /* 根据LFU算法进行页面替换 */
@@ -225,6 +238,40 @@ void do_LFU(Ptr_PageTableItem ptr_pageTabIt)
 	ptr_pageTabIt->filled = TRUE;
 	ptr_pageTabIt->edited = FALSE;
 	ptr_pageTabIt->count = 0;
+	printf("页面替换成功\n");
+}
+
+void do_LRU(Ptr_PageTableItem ptr_pageTabIt)
+{
+	unsigned int i, max, page;
+	printf("没有空闲物理块，开始进行LRU页面替换...\n");
+	for (i = 0, max = 0, page = 0; i < PAGE_SUM; i++)
+	{
+		if (pageTable[i].count < max)
+		{
+			max = pageTable[i].count;
+			page = i;
+		}
+	}
+	printf("选择第%u页进行替换\n", page);
+	if (pageTable[page].edited)
+	{
+		/* 页面内容有修改，需要写回至辅存 */
+		printf("该页内容有修改，写回至辅存\n");
+		do_page_out(&pageTable[page]);
+	}
+	pageTable[page].filled = FALSE;
+	pageTable[page].unusedTime = 0;
+
+
+	/* 读辅存内容，写入到实存 */
+	do_page_in(ptr_pageTabIt, pageTable[page].blockNum);
+	
+	/* 更新页表内容 */
+	ptr_pageTabIt->blockNum = pageTable[page].blockNum;
+	ptr_pageTabIt->filled = TRUE;
+	ptr_pageTabIt->edited = FALSE;
+	ptr_pageTabIt->unusedTime = 0;
 	printf("页面替换成功\n");
 }
 
@@ -344,6 +391,7 @@ void do_error(ERROR_CODE code)
 
 /* 产生访存请求 */
 void do_request()
+
 {
 	/* 随机产生请求地址 */
 	ptr_memAccReq->virAddr = random() % VIRTUAL_MEMORY_SIZE;
@@ -408,14 +456,38 @@ char *get_proType_str(char *str, BYTE type)
 	return str;
 }
 
+void initFile(){
+	int i;
+	char *key = "0123456789QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm";
+	char buffer[VIRTUAL_MEMORY_SIZE + 1];
+	//errno_t err;
+
+	ptr_auxMem = fopen(AUXILIARY_MEMORY,"w+");
+	for (i=0;i<VIRTUAL_MEMORY_SIZE - 3 ; i++)
+		buffer[i]=key[rand()%62];
+	buffer[VIRTUAL_MEMORY_SIZE - 3] = 'y';
+	buffer[VIRTUAL_MEMORY_SIZE - 2] = 'm';
+	buffer[VIRTUAL_MEMORY_SIZE - 1] = 'c';
+	buffer[VIRTUAL_MEMORY_SIZE ] = '\0';
+
+	fwrite(buffer,sizeof(BYTE),VIRTUAL_MEMORY_SIZE,ptr_auxMem);
+
+	printf("mark");
+	fclose(ptr_auxMem);
+}
+
 int main(int argc, char* argv[])
 {
 	char c;
 	int i;
+	initFile();
 	if (!(ptr_auxMem = fopen(AUXILIARY_MEMORY, "r+")))
 	{
+		printf("This barrier is not passed : ( \n");
 		do_error(ERROR_FILE_OPEN_FAILED);
 		exit(1);
+	}else{
+		printf("This barrier is passed : ) \n");
 	}
 	
 	do_init();

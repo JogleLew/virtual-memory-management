@@ -1,4 +1,4 @@
-#ifndef VMM_H
+﻿#ifndef VMM_H
 #define VMM_H
 
 #ifndef DEBUG
@@ -43,6 +43,7 @@ typedef enum {
 /* 页表项 */
 typedef struct
 {
+	unsigned int unusedTime;
 	unsigned int pageNum;
 	unsigned int blockNum; //物理块号
 	BOOL filled; //页面装入特征位
