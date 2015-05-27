@@ -87,6 +87,7 @@ void do_init()
 	}
 }
 
+//ALogorithm LRU necessary steps on the taken
 void LRU_entail(Ptr_PageTableItem ptr_pageTabIt){
 	int i;
 	ptr_pageTabIt->unusedTime=0;
@@ -201,6 +202,7 @@ void do_page_fault(Ptr_PageTableItem ptr_pageTabIt)
 		}
 	}
 	/* 没有空闲物理块，进行页面替换 */
+        // do_LRU replaced do_LFU type
 	do_LRU(ptr_pageTabIt);
 }
 
@@ -241,13 +243,13 @@ void do_LFU(Ptr_PageTableItem ptr_pageTabIt)
 
 void do_LRU(Ptr_PageTableItem ptr_pageTabIt)
 {
-	unsigned int i, min, page;
+	unsigned int i, max, page;
 	printf("没有空闲物理块，开始进行LRU页面替换...\n");
-	for (i = 0, min = 0, page = 0; i < PAGE_SUM; i++)
+	for (i = 0, max = 0, page = 0; i < PAGE_SUM; i++)
 	{
-		if (pageTable[i].count < min)
+		if (pageTable[i].count < max)
 		{
-			min = pageTable[i].count;
+			max = pageTable[i].count;
 			page = i;
 		}
 	}
@@ -259,7 +261,7 @@ void do_LRU(Ptr_PageTableItem ptr_pageTabIt)
 		do_page_out(&pageTable[page]);
 	}
 	pageTable[page].filled = FALSE;
-	pageTable[page].count = 0;
+	pageTable[page].unusedTime = 0;
 
 
 	/* 读辅存内容，写入到实存 */
@@ -269,7 +271,7 @@ void do_LRU(Ptr_PageTableItem ptr_pageTabIt)
 	ptr_pageTabIt->blockNum = pageTable[page].blockNum;
 	ptr_pageTabIt->filled = TRUE;
 	ptr_pageTabIt->edited = FALSE;
-	ptr_pageTabIt->count = 0;
+	ptr_pageTabIt->unusedTime = 0;
 	printf("页面替换成功\n");
 }
 
