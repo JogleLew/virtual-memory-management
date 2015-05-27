@@ -2,9 +2,14 @@
 #include <stdlib.h>
 #include <time.h>
 #include <memory.h>
+#include <string.h>
 #include "vmm.h"
 #define DEBUG
 
+/* JG页目录*/
+PageCatalogueItem JGpageCatalogue[PAGE_CATALOGUE_SUM];
+/* JG页表使用标识 */
+BOOL pageStatus[PAGE_CATALOGUE_SUM];
 /* 页表 */
 PageTableItem pageTable[PAGE_SUM];
 /* 实存空间 */
@@ -16,29 +21,143 @@ BOOL blockStatus[BLOCK_SUM];
 /* 访存请求 */
 Ptr_MemoryAccessRequest ptr_memAccReq;
 
+void JGinitPageCatalogue()
+{
+	int i;
+	for (i = 0; i < PAGE_CATALOGUE_SUM; i++){
+		JGpageCatalogue[i].pageCatalogueNum = i;
+		JGpageCatalogue[i].pageNum = 0;
+		JGpageCatalogue[i].filled = FALSE;
+		JGpageCatalogue[i].count = 0;
+		JGpageCatalogue[i].auxAddr = PAGE_SIZE * 2 * i + PAGE_SIZE;
+		pageStatus[i] = FALSE;
+	}
+}
+
+void JGrandomPageIn(int j)
+{
+	int i, catalogueNum = j / PAGE_SIZE, pageOffset = j % PAGE_SIZE, pageNum;
+	for (i = 0; i < PAGE_CATALOGUE_SUM; i++)
+		if (!pageStatus[i])
+			break;
+	if (!JGpageCatalogue[catalogueNum].filled){
+		pageNum = i + pageOffset;
+		JGpageCatalogue[catalogueNum].pageNum = i;
+		JGpageCatalogue[catalogueNum].filled = TRUE;
+		pageStatus[i] = TRUE;
+		pageTable[pageNum].blockNum = j;
+		pageTable[pageNum].filled = TRUE;
+		#ifdef DEBUG
+			printf("catalogue num: %d -> pageNum: %d\n", catalogueNum, i);
+			printf("pageNum: %d -> block: %d\n", pageNum, j);
+		#endif
+	}
+	else{
+		pageNum = JGpageCatalogue[catalogueNum].pageNum + pageOffset;
+		pageTable[pageNum].blockNum = j;
+		pageTable[pageNum].filled = TRUE;
+		#ifdef DEBUG
+			printf("catalogue num: %d -> pageNum: %d\n", catalogueNum, JGpageCatalogue[catalogueNum].pageNum);
+			printf("pageNum: %d -> block: %d\n", pageNum, j);
+		#endif
+	}
+}
+
+void JGdo_print_catalogue_info()
+{
+	unsigned int i, j, k;
+	char str[4];
+	printf("***********************页目录***********************\n");
+	printf("页目录号页号\t装入\t计数\t辅存\n");
+	for (i = 0; i < PAGE_CATALOGUE_SUM; i++)
+	{
+		printf("%u\t%u\t%u\t%u\t%u\n", 
+			i, JGpageCatalogue[i].pageNum * PAGE_SIZE, JGpageCatalogue[i].filled, 
+			JGpageCatalogue[i].count, JGpageCatalogue[i].auxAddr);
+	}
+}
+
 void JGdo_print_aux_info()
 {
 	int i;
 	BYTE auxMem[512];
-	if (fseek(ptr_auxMem, 504, SEEK_SET) < 0)
+	if (fseek(ptr_auxMem, 0, SEEK_SET) < 0)
 	{
 		do_error(ERROR_FILE_SEEK_FAILED);
 		exit(1);
 	}
 	memset(auxMem, 0, sizeof(auxMem));
-	fread(auxMem, 1, 512, ptr_auxMem);
-	printf("辅存信息：\n");
-	for (i = 0; i < 512; i++)
-		printf("地址%3d : %d\n", i, auxMem[i]);
+	fread(auxMem, sizeof(BYTE), 512, ptr_auxMem);
+	printf("*****************************辅存信息*****************************\n");
+	for (i = 0; i < 512; i += 4)
+		printf("地址%3d : %02X | 地址%3d : %02X | 地址%3d : %02X | 地址%3d : %02X\n", 
+			i, auxMem[i], i + 1, auxMem[i + 1], i + 2, auxMem[i + 2], i + 3, auxMem[i + 3]);
 	printf("\n");
 }
 
 void JGdo_print_act_info()
 {
 	int i;
-	printf("实存信息：\n");
-	for (i = 0; i < ACTUAL_MEMORY_SIZE; i++)
-		printf("地址%3d : %d\n", i, actMem[i]);
+	printf("*****************************实存信息*****************************\n");
+	for (i = 0; i < ACTUAL_MEMORY_SIZE; i += 4)
+		printf("物理块%3d || 地址%3d : %02X | 地址%3d : %02X | 地址%3d : %02X | 地址%3d : %02X\n", 
+			i / 4, i, actMem[i], i + 1, actMem[i + 1], i + 2, actMem[i + 2], i + 3, actMem[i + 3]);
+}
+
+unsigned int JGcalPageCatalogueNum()
+{
+	return ptr_memAccReq->virAddr / PAGE_SIZE / PAGE_SIZE;
+}
+
+unsigned int JGcalPageCatalogueOffset()
+{
+	return ptr_memAccReq->virAddr / PAGE_SIZE % PAGE_SIZE;
+}
+
+void JGresponsePrint(unsigned int num, unsigned int off, unsigned int off2)
+{
+	printf("页目录号为：%u\t页目录偏移为：%u\t页内偏移为：%u\n", num, off, off2);
+}
+
+void JGunknown()
+{
+	#ifdef DEBUG
+		printf("unknown error!\n");
+	#endif
+}
+
+void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
+{
+	unsigned int i, j, virAddr;
+	PageTableItem pageTabItem;
+	printf("产生缺页目录中断，开始进行调页...\n");
+	for (i = 0; i < BLOCK_SUM; i++)
+	{
+		if (!blockStatus[i])
+		{
+			pageTabItem.auxAddr = ptr_pageCatalogueItem->auxAddr;
+			/* 读辅存内容，写入到实存 */
+			do_page_in(&pageTabItem, i);
+			
+			/* 更新页目录和页表内容 */
+			virAddr = ptr_memAccReq->virAddr;
+			for (j = 0; j < PAGE_CATALOGUE_SUM; j++)
+				if (!pageStatus[j])
+					break;
+			ptr_pageCatalogueItem->pageNum = j;
+			pageStatus[j] = TRUE;
+
+			pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()].blockNum = i;
+			pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()].filled = TRUE;
+			pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()].edited = FALSE;
+			pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()].count = 0;
+			
+			blockStatus[i] = TRUE;
+			return;
+		}
+	}
+	/* 没有空闲物理块，进行页面替换 */
+	JGunknown();
 }
 
 /* 初始化环境 */
@@ -96,15 +215,17 @@ void do_init()
 		/* 设置该页对应的辅存地址 */
 		pageTable[i].auxAddr = i * PAGE_SIZE * 2;
 	}
+	JGinitPageCatalogue();
 	for (j = 0; j < BLOCK_SUM; j++)
 	{
 		/* 随机选择一些物理块进行页面装入 */
 		if (random() % 2 == 0)
 		{
 			do_page_in(&pageTable[j], j);
-			pageTable[j].blockNum = j;
-			pageTable[j].filled = TRUE;
+			//pageTable[j].blockNum = j;
+			//pageTable[j].filled = TRUE;
 			blockStatus[j] = TRUE;
+			JGrandomPageIn(j);
 		}
 		else
 			blockStatus[j] = FALSE;
@@ -116,7 +237,8 @@ void do_init()
 void do_response()
 {
 	Ptr_PageTableItem ptr_pageTabIt;
-	unsigned int pageNum, offAddr;
+	Ptr_PageCatalogueItem ptr_pageCatalogueItem;
+	unsigned int JGpageCatalogueNum, JGpageCatalogueOffset, pageNum, offAddr;
 	unsigned int actAddr;
 	
 	/* 检查地址是否越界 */
@@ -127,11 +249,18 @@ void do_response()
 	}
 	
 	/* 计算页号和页内偏移值 */
-	pageNum = ptr_memAccReq->virAddr / PAGE_SIZE;
+	//pageNum = ptr_memAccReq->virAddr / PAGE_SIZE;
+	JGpageCatalogueNum = JGcalPageCatalogueNum();
+	JGpageCatalogueOffset = JGcalPageCatalogueOffset();
 	offAddr = ptr_memAccReq->virAddr % PAGE_SIZE;
-	printf("页号为：%u\t页内偏移为：%u\n", pageNum, offAddr);
+	//printf("页号为：%u\t页内偏移为：%u\n", pageNum, offAddr);
+	JGresponsePrint(JGpageCatalogueNum, JGpageCatalogueOffset, offAddr);
 
 	/* 获取对应页表项 */
+	ptr_pageCatalogueItem = &JGpageCatalogue[JGpageCatalogueNum];
+	if (!ptr_pageCatalogueItem->filled)
+		JGdo_page_catalogue_fault(ptr_pageCatalogueItem);
+	pageNum = ptr_pageCatalogueItem->pageNum * PAGE_SIZE + JGpageCatalogueOffset;
 	ptr_pageTabIt = &pageTable[pageNum];
 	
 	/* 根据特征位决定是否产生缺页中断 */
@@ -368,17 +497,31 @@ void do_error(ERROR_CODE code)
 
 int JGdo_request()
 {
-	int addr, writeValue;
+	char input[255];
+	int i, addr, writeValue;
 	char c;
 	printf("请输入请求地址：");
-	scanf("%d", &addr);
+	scanf(" %s", input);
+	for (i = 0; i < strlen(input); i++)
+		if (input[i] < '0' || input[i] > '9'){
+			printf("输入错误，请重新输入。\n");
+			return 1;
+		}
+	addr = 0;
+	for (i = 0; i < strlen(input); i++)
+		addr = addr * 10 + (input[i] - '0');
 	if (addr >= VIRTUAL_MEMORY_SIZE){
 		printf("输入错误，请重新输入。\n");
 		return 1;
 	}
 	ptr_memAccReq->virAddr = addr;
 	printf("请输入请求类型(r/w/x)：");
-	scanf(" %c", &c);
+	scanf(" %s", input);
+	if (strlen(input) != 1){
+		printf("输入错误，请重新输入。\n"); 
+		return 1;
+	}
+	c = input[0];
 	switch (c){
 		case 'r': case 'R': 
 			ptr_memAccReq->reqType = REQUEST_READ;
@@ -387,7 +530,15 @@ int JGdo_request()
 		case 'w': case 'W': 
 			ptr_memAccReq->reqType = REQUEST_WRITE;
 			printf("请输入写入内容：");
-			scanf("%d", &writeValue);
+			scanf(" %s", input);
+			for (i = 0; i < strlen(input); i++)
+				if (input[i] < '0' || input[i] > '9'){
+					printf("输入错误，请重新输入。\n");
+					return 1;
+				}
+			writeValue = 0;
+			for (i = 0; i < strlen(input); i++)
+				writeValue = writeValue * 10 + (input[i] - '0');
 			ptr_memAccReq->value = writeValue;
 		break;
 		case 'x': case 'X': 
@@ -397,6 +548,9 @@ int JGdo_request()
 		default: 
 			printf("输入错误，请重新输入。\n"); return 1;
 	}
+	c = getchar();
+	if (c != '\n')
+		ungetc(c, stdin);
 	return 0;
 }
 
@@ -438,10 +592,11 @@ void do_print_info()
 {
 	unsigned int i, j, k;
 	char str[4];
+	printf("***********************页表***********************\n");
 	printf("页号\t块号\t装入\t修改\t保护\t计数\t辅存\n");
 	for (i = 0; i < PAGE_SUM; i++)
 	{
-		printf("%u\t%u \t%u\t\t%u\t%s\t%u  \t%u\n", i, pageTable[i].blockNum, pageTable[i].filled, 
+		printf("%u\t%u \t%u\t%u\t%s\t%u  \t%u\n", i, pageTable[i].blockNum, pageTable[i].filled, 
 			pageTable[i].edited, get_proType_str(str, pageTable[i].proType), 
 			pageTable[i].count, pageTable[i].auxAddr);
 	}
@@ -477,6 +632,7 @@ int main(int argc, char* argv[])
 	}
 	
 	do_init();
+	JGdo_print_catalogue_info();
 	do_print_info();
 	ptr_memAccReq = (Ptr_MemoryAccessRequest) malloc(sizeof(MemoryAccessRequest));
 	/* 在循环中模拟访存请求与处理过程 */
@@ -487,6 +643,7 @@ int main(int argc, char* argv[])
 		do_response();
 		printf("按Y打印页表，辅存和实存，按其他键不打印...\n");
 		if ((c = getchar()) == 'y' || c == 'Y'){
+			JGdo_print_catalogue_info();
 			do_print_info();
 			JGdo_print_aux_info();
 			JGdo_print_act_info();
