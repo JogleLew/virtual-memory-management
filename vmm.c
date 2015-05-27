@@ -456,14 +456,38 @@ char *get_proType_str(char *str, BYTE type)
 	return str;
 }
 
+void initFile(){
+	int i;
+	char *key = "0123456789QWERTYUIOPASDFGHJKLZXCVBNMqwertyuiopasdfghjklzxcvbnm";
+	char buffer[VIRTUAL_MEMORY_SIZE + 1];
+	//errno_t err;
+
+	ptr_auxMem = fopen(AUXILIARY_MEMORY,"w+");
+	for (i=0;i<VIRTUAL_MEMORY_SIZE - 3 ; i++)
+		buffer[i]=key[rand()%62];
+	buffer[VIRTUAL_MEMORY_SIZE - 3] = 'y';
+	buffer[VIRTUAL_MEMORY_SIZE - 2] = 'm';
+	buffer[VIRTUAL_MEMORY_SIZE - 1] = 'c';
+	buffer[VIRTUAL_MEMORY_SIZE ] = '\0';
+
+	fwrite(buffer,sizeof(BYTE),VIRTUAL_MEMORY_SIZE,ptr_auxMem);
+
+	printf("mark");
+	fclose(ptr_auxMem);
+}
+
 int main(int argc, char* argv[])
 {
 	char c;
 	int i;
+	initFile();
 	if (!(ptr_auxMem = fopen(AUXILIARY_MEMORY, "r+")))
 	{
+		printf("This barrier is not passed : ( \n");
 		do_error(ERROR_FILE_OPEN_FAILED);
 		exit(1);
+	}else{
+		printf("This barrier is passed : ) \n");
 	}
 	
 	do_init();
