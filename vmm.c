@@ -4,7 +4,7 @@
 #include <memory.h>
 #include <string.h>
 #include "vmm.h"
-#define DEBUG
+//#define DEBUG
 
 /* JG页目录*/
 PageCatalogueItem JGpageCatalogue[PAGE_CATALOGUE_SUM];
@@ -20,6 +20,11 @@ FILE *ptr_auxMem;
 BOOL blockStatus[BLOCK_SUM];
 /* 访存请求 */
 Ptr_MemoryAccessRequest ptr_memAccReq;
+/* 运行程序数目 */
+int numOfProgram, numOfRunning, isRunning[255];
+
+/* 管道 */
+int fd[2];
 
 void JGinitPageCatalogue()
 {
@@ -119,13 +124,6 @@ void JGresponsePrint(unsigned int num, unsigned int off, unsigned int off2)
 	printf("页目录号为：%u\t页目录偏移为：%u\t页内偏移为：%u\n", num, off, off2);
 }
 
-void JGunknown()
-{
-	#ifdef DEBUG
-		printf("unknown error!\n");
-	#endif
-}
-
 void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
 {
 	unsigned int i, j, virAddr;
@@ -145,6 +143,7 @@ void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
 				if (!pageStatus[j])
 					break;
 			ptr_pageCatalogueItem->pageNum = j;
+			ptr_pageCatalogueItem->filled = TRUE;
 			pageStatus[j] = TRUE;
 
 			pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()].blockNum = i;
@@ -157,7 +156,145 @@ void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
 		}
 	}
 	/* 没有空闲物理块，进行页面替换 */
-	JGunknown();
+	do_LFU(NULL);
+}
+
+int JGdo_request()
+{
+	char input[255], sig[255];
+	int i, addr, writeValue, pos = 0;
+	char c;
+	printf("请输入请求地址(0-%d)：", VIRTUAL_MEMORY_SIZE / numOfProgram - 1);
+	scanf(" %s", input);
+	for (i = 0; i < strlen(input); i++)
+		if (input[i] < '0' || input[i] > '9'){
+			printf("输入错误，请重新输入。\n");
+			return 1;
+		}
+	addr = 0;
+	for (i = 0; i < strlen(input); i++)
+		addr = addr * 10 + (input[i] - '0');
+	if (addr >= VIRTUAL_MEMORY_SIZE / numOfProgram){
+		printf("输入错误，请重新输入。\n");
+		return 1;
+	}
+
+	// 请求地址正确，记录到sig数组中。
+	for (i = 0; i < strlen(input); i++)
+		sig[pos++] = input[i];
+	sig[pos++] = '\n';
+
+	printf("请输入请求类型(r/w/x)：");
+	scanf(" %s", input);
+	if (strlen(input) != 1){
+		printf("输入错误，请重新输入。\n"); 
+		return 1;
+	}
+
+	c = input[0];
+	// 请求类型正确，记录到sig数组中。
+	sig[pos++] = c;
+	sig[pos++] = '\n';
+
+	switch (c){
+		case 'r': case 'R': case 'x': case 'X': 
+			;
+		break;
+		case 'w': case 'W': 
+			printf("请输入写入内容：");
+			scanf(" %s", input);
+			for (i = 0; i < strlen(input); i++)
+				if (input[i] < '0' || input[i] > '9'){
+					printf("输入错误，请重新输入。\n");
+					return 1;
+				}
+			// 请求内容正确，记录到sig数组中。
+			for (i = 0; i < strlen(input); i++)
+				sig[pos++] = input[i];
+			sig[pos++] = '\n';
+		break;
+		default: 
+			printf("输入错误，请重新输入。\n"); return 1;
+	}
+	sig[pos++] = '\0';
+	close(fd[0]);
+	write(fd[1], sig, 255);
+	close(fd[1]);
+	return 0;
+}
+
+void JGrequest_handle(int currentProgram)
+{
+	char c, sig[255], input1[255], input2[255], input3[255];
+	int i, addr, writeValue;
+
+	close(fd[1]);
+	read(fd[0], sig, 255);
+	close(fd[0]);
+	sscanf(sig, "%s%s%s", input1, input2, input3);
+
+	addr = 0;
+	for (i = 0; i < strlen(input1); i++)
+		addr = addr * 10 + (input1[i] - '0');
+	ptr_memAccReq->virAddr = addr + (currentProgram - 1) * VIRTUAL_MEMORY_SIZE / numOfProgram;
+
+	c = input2[0];
+	switch (c){
+		case 'r': case 'R': 
+			ptr_memAccReq->reqType = REQUEST_READ;
+			printf("请求：\n地址：%u\t类型：读取\n", ptr_memAccReq->virAddr);
+		break;
+		case 'w': case 'W': 
+			ptr_memAccReq->reqType = REQUEST_WRITE;
+
+			writeValue = 0;
+			for (i = 0; i < strlen(input3); i++)
+				writeValue = writeValue * 10 + (input3[i] - '0');
+			ptr_memAccReq->value = writeValue;
+			printf("请求：\n地址：%u\t类型：写入\n", ptr_memAccReq->virAddr);
+		break;
+		case 'x': case 'X': 
+			ptr_memAccReq->reqType = REQUEST_EXECUTE;
+			printf("产生请求：\n地址：%u\t类型：执行\n", ptr_memAccReq->virAddr);
+		break;
+	}
+}
+
+void JGcreateRequestProcess(int currentProgram)
+{
+	pid_t pid;
+	pipe(fd);
+	if ((pid = fork()) < 0){
+		printf("fork failed.\n");
+		exit(0);
+	}
+	if (pid == 0){ // child process
+		while (JGdo_request()) ;
+		exit(0);
+	}
+	else{
+		waitpid(-1, NULL, 0);
+		JGrequest_handle(currentProgram);
+	}
+}
+
+void JGgetNumOfProgram()
+{
+	int t;
+	char c;
+	printf("请输入运行程序的数量：\n");
+	scanf("%d", &t);
+	while (t < 1){
+		printf("输入错误，请重新输入。\n");
+		scanf("%d", &t);
+	}
+	numOfProgram = t;
+	numOfRunning = numOfProgram;
+	for (t = 1; t <= numOfProgram; t++){
+		isRunning[t] = 1;
+	}
+	if ((c = getchar()) != '\n')
+		ungetc(c, stdin);
 }
 
 /* 初始化环境 */
@@ -495,65 +632,6 @@ void do_error(ERROR_CODE code)
 	}
 }
 
-int JGdo_request()
-{
-	char input[255];
-	int i, addr, writeValue;
-	char c;
-	printf("请输入请求地址：");
-	scanf(" %s", input);
-	for (i = 0; i < strlen(input); i++)
-		if (input[i] < '0' || input[i] > '9'){
-			printf("输入错误，请重新输入。\n");
-			return 1;
-		}
-	addr = 0;
-	for (i = 0; i < strlen(input); i++)
-		addr = addr * 10 + (input[i] - '0');
-	if (addr >= VIRTUAL_MEMORY_SIZE){
-		printf("输入错误，请重新输入。\n");
-		return 1;
-	}
-	ptr_memAccReq->virAddr = addr;
-	printf("请输入请求类型(r/w/x)：");
-	scanf(" %s", input);
-	if (strlen(input) != 1){
-		printf("输入错误，请重新输入。\n"); 
-		return 1;
-	}
-	c = input[0];
-	switch (c){
-		case 'r': case 'R': 
-			ptr_memAccReq->reqType = REQUEST_READ;
-			printf("请求：\n地址：%u\t类型：读取\n", ptr_memAccReq->virAddr);
-		break;
-		case 'w': case 'W': 
-			ptr_memAccReq->reqType = REQUEST_WRITE;
-			printf("请输入写入内容：");
-			scanf(" %s", input);
-			for (i = 0; i < strlen(input); i++)
-				if (input[i] < '0' || input[i] > '9'){
-					printf("输入错误，请重新输入。\n");
-					return 1;
-				}
-			writeValue = 0;
-			for (i = 0; i < strlen(input); i++)
-				writeValue = writeValue * 10 + (input[i] - '0');
-			ptr_memAccReq->value = writeValue;
-		break;
-		case 'x': case 'X': 
-			ptr_memAccReq->reqType = REQUEST_EXECUTE;
-			printf("产生请求：\n地址：%u\t类型：执行\n", ptr_memAccReq->virAddr);
-		break;
-		default: 
-			printf("输入错误，请重新输入。\n"); return 1;
-	}
-	c = getchar();
-	if (c != '\n')
-		ungetc(c, stdin);
-	return 0;
-}
-
 /* 产生访存请求 */
 void do_request()
 {
@@ -624,38 +702,47 @@ char *get_proType_str(char *str, BYTE type)
 int main(int argc, char* argv[])
 {
 	char c;
-	int i;
+	int i, j;
 	if (!(ptr_auxMem = fopen(AUXILIARY_MEMORY, "r+")))
 	{
 		do_error(ERROR_FILE_OPEN_FAILED);
 		exit(1);
 	}
-	
+
 	do_init();
+	JGgetNumOfProgram();
 	JGdo_print_catalogue_info();
 	do_print_info();
 	ptr_memAccReq = (Ptr_MemoryAccessRequest) malloc(sizeof(MemoryAccessRequest));
 	/* 在循环中模拟访存请求与处理过程 */
 	while (TRUE)
 	{
-		//do_request();
-		while (JGdo_request()) ;
-		do_response();
-		printf("按Y打印页表，辅存和实存，按其他键不打印...\n");
-		if ((c = getchar()) == 'y' || c == 'Y'){
-			JGdo_print_catalogue_info();
-			do_print_info();
-			JGdo_print_aux_info();
-			JGdo_print_act_info();
+		for (j = 1; j <= numOfProgram; j++){
+			if (isRunning[j]){
+				printf("------------------------第%d个程序------------------------\n", j);
+				//do_request();
+				JGcreateRequestProcess(j);
+				do_response();
+				printf("按Y打印页表，辅存和实存，按其他键不打印...\n");
+				if ((c = getchar()) == 'y' || c == 'Y'){
+					JGdo_print_catalogue_info();
+					do_print_info();
+					JGdo_print_aux_info();
+					JGdo_print_act_info();
+				}
+				while (c != '\n')
+					c = getchar();
+				printf("按X退出程序，按其他键继续...\n");
+				if ((c = getchar()) == 'x' || c == 'X'){
+					isRunning[j] = 0;
+					numOfRunning--;
+				}
+				while (c != '\n')
+					c = getchar();
+			}
 		}
-		while (c != '\n')
-			c = getchar();
-		printf("按X退出程序，按其他键继续...\n");
-		if ((c = getchar()) == 'x' || c == 'X')
+		if (numOfRunning == 0)
 			break;
-		while (c != '\n')
-			c = getchar();
-		//sleep(5000);
 	}
 
 	if (fclose(ptr_auxMem) == EOF)
