@@ -45,7 +45,6 @@ typedef struct
 	unsigned int pageCatalogueNum;
 	unsigned int pageNum; //页号
 	BOOL filled; //页面装入特征位
-	unsigned long auxAddr; //外存地址
 	unsigned long count; //页面使用计数器
 } PageCatalogueItem, *Ptr_PageCatalogueItem;
 
@@ -59,6 +58,7 @@ typedef struct
 	BOOL edited; //页面修改标识
 	unsigned long auxAddr; //外存地址
 	unsigned long count; //页面使用计数器
+	unsigned int unusedTime;
 } PageTableItem, *Ptr_PageTableItem;
 
 /* 访存请求类型 */
