@@ -34,7 +34,7 @@ void JGinitPageCatalogue()
 		JGpageCatalogue[i].pageNum = 0;
 		JGpageCatalogue[i].filled = FALSE;
 		JGpageCatalogue[i].count = 0;
-		JGpageCatalogue[i].auxAddr = PAGE_SIZE * 2 * i + PAGE_SIZE;
+		//JGpageCatalogue[i].auxAddr = PAGE_SIZE * 2 * i + PAGE_SIZE;
 		pageStatus[i] = FALSE;
 	}
 }
@@ -73,12 +73,12 @@ void JGdo_print_catalogue_info()
 	unsigned int i, j, k;
 	char str[4];
 	printf("***********************页目录***********************\n");
-	printf("页目录号页号\t装入\t计数\t辅存\n");
+	printf("页目录号页号\t装入\t计数\n");
 	for (i = 0; i < PAGE_CATALOGUE_SUM; i++)
 	{
-		printf("%u\t%u\t%u\t%u\t%u\n", 
+		printf("%u\t%u\t%u\t%u\n", 
 			i, JGpageCatalogue[i].pageNum * PAGE_SIZE, JGpageCatalogue[i].filled, 
-			JGpageCatalogue[i].count, JGpageCatalogue[i].auxAddr);
+			JGpageCatalogue[i].count);
 	}
 }
 
@@ -127,21 +127,23 @@ void JGresponsePrint(unsigned int num, unsigned int off, unsigned int off2)
 void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
 {
 	unsigned int i, j, virAddr;
-	PageTableItem pageTabItem;
-	printf("产生缺页目录中断，开始进行调页...\n");
+	Ptr_PageTableItem ptr_pageTableItem;
+	printf("产生缺页目录中断，开始进行分配...\n");
 	for (i = 0; i < BLOCK_SUM; i++)
 	{
 		if (!blockStatus[i])
 		{
-			pageTabItem.auxAddr = ptr_pageCatalogueItem->auxAddr;
+			//pageTabItem.auxAddr = ptr_pageCatalogueItem->auxAddr;
 			/* 读辅存内容，写入到实存 */
-			do_page_in(&pageTabItem, i);
 			
 			/* 更新页目录和页表内容 */
 			virAddr = ptr_memAccReq->virAddr;
 			for (j = 0; j < PAGE_CATALOGUE_SUM; j++)
 				if (!pageStatus[j])
 					break;
+			ptr_pageTableItem = &pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()];
+			do_page_in(ptr_pageTableItem, i);
+
 			ptr_pageCatalogueItem->pageNum = j;
 			ptr_pageCatalogueItem->filled = TRUE;
 			pageStatus[j] = TRUE;
