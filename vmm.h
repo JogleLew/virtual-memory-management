@@ -1,4 +1,4 @@
-﻿#ifndef VMM_H
+#ifndef VMM_H
 #define VMM_H
 
 #ifndef DEBUG
@@ -20,7 +20,8 @@
 #define PAGE_SUM (VIRTUAL_MEMORY_SIZE / PAGE_SIZE)
 /* 总物理块数 */
 #define BLOCK_SUM (ACTUAL_MEMORY_SIZE / PAGE_SIZE)
-
+/* JG页目录项目数 */
+#define PAGE_CATALOGUE_SUM (PAGE_SUM / PAGE_SIZE)
 
 /* 可读标识位 */
 #define READABLE 0x01u
@@ -38,7 +39,16 @@ typedef enum {
 	TRUE = 1, FALSE = 0
 } BOOL;
 
-
+/* JG页目录项 */
+typedef struct
+{
+	
+	unsigned int pageCatalogueNum;
+	unsigned int pageNum; //页号
+	BOOL filled; //页面装入特征位
+	unsigned long auxAddr; //外存地址
+	unsigned long count; //页面使用计数器
+} PageCatalogueItem, *Ptr_PageCatalogueItem;
 
 /* 页表项 */
 typedef struct
