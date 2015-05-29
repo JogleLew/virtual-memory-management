@@ -3,6 +3,10 @@
 #include <time.h>
 #include <memory.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "vmm.h"
 //#define DEBUG
 
@@ -24,7 +28,7 @@ Ptr_MemoryAccessRequest ptr_memAccReq;
 int numOfProgram, numOfRunning, isRunning[255];
 
 /* 管道 */
-int fd[2];
+int fd;
 
 //ALogorithm LRU necessary steps on the taken
 void HVLRU_entail(Ptr_PageTableItem ptr_pageTabIt){
@@ -185,7 +189,7 @@ void JGdo_page_catalogue_fault(Ptr_PageCatalogueItem ptr_pageCatalogueItem)
 	ptr_pageTableItem = &pageTable[j * PAGE_SIZE + JGcalPageCatalogueOffset()];
 }
 
-int JGdo_request()
+/*int JGdo_request()
 {
 	char input[255], sig[255];
 	int i, addr, writeValue, pos = 0;
@@ -255,16 +259,21 @@ int JGdo_request()
 	write(fd[1], sig, 255);
 	close(fd[1]);
 	return 0;
-}
+}*/
 
 void JGrequest_handle(int currentProgram)
 {
 	char c, sig[255], input1[255], input2[255], input3[255];
 	int i, addr, writeValue;
 
-	close(fd[1]);
-	read(fd[0], sig, 255);
-	close(fd[0]);
+	label: if ((fd = open("fifo", O_RDONLY)) < 0){  
+		printf("打开FIFO失败。\n");  
+		exit(0);  
+	}
+	if (read(fd, sig, 255) == 0){  
+		printf("读取失败。\n");
+	}
+	close(fd);
 	sscanf(sig, "%s%s%s", input1, input2, input3);
 
 	addr = 0;
@@ -275,6 +284,10 @@ void JGrequest_handle(int currentProgram)
 
 	for (i = 0; i < strlen(input1); i++)
 		addr = addr * 10 + (input1[i] - '0');
+	if (addr >= VIRTUAL_MEMORY_SIZE / numOfProgram){
+		printf("请求地址范围为0-%d，请重新输入。\n", VIRTUAL_MEMORY_SIZE / numOfProgram - 1);
+		goto label;
+	}
 	ptr_memAccReq->virAddr = addr + (currentProgram - 1) * VIRTUAL_MEMORY_SIZE / numOfProgram;
 
 	c = input2[0];
@@ -301,20 +314,21 @@ void JGrequest_handle(int currentProgram)
 
 void JGcreateRequestProcess(int currentProgram)
 {
-	pid_t pid;
-	pipe(fd);
-	if ((pid = fork()) < 0){
-		printf("fork failed.\n");
-		exit(0);
-	}
-	if (pid == 0){ // child process
-		while (JGdo_request()) ;
-		exit(0);
-	}
-	else{
-		waitpid(-1, NULL, 0);
-		JGrequest_handle(currentProgram);
-	}
+	// pid_t pid;
+	// pipe(fd);
+	// if ((pid = fork()) < 0){
+	// 	printf("fork failed.\n");
+	// 	exit(0);
+	// }
+	// if (pid == 0){ // child process
+	// 	while (JGdo_request()) ;
+	// 	exit(0);
+	// }
+	// else{
+	// 	waitpid(-1, NULL, 0);
+	// 	JGrequest_handle(currentProgram);
+	// }
+	JGrequest_handle(currentProgram);
 }
 
 void JGgetNumOfProgram()
@@ -747,12 +761,19 @@ int main(int argc, char* argv[])
 {
 	char c;
 	int i, j;
+	mode_t mode = 0666;
 	if (!(ptr_auxMem = fopen(AUXILIARY_MEMORY, "r+")))
 	{
 		do_error(ERROR_FILE_OPEN_FAILED);
 		exit(1);
 	}
-
+	remove("fifo");
+	if ((mkfifo("fifo", mode)) < 0)
+	{
+		printf("创建FIFO失败。\n");
+		return 0;
+	}
+	printf("创建FIFO成功。\n");
 	do_init();
 	JGgetNumOfProgram();
 	JGdo_print_catalogue_info();
